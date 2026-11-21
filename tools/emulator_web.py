@@ -7,6 +7,7 @@ serial port to the ESP32 - the same bytes a real FA-05 would send.
 
     python emulator_web.py              # port auto: first COM found
     python emulator_web.py COM3         # force a port
+    python emulator_web.py --host 192.168.50.133 --no-serial  # LAN access, no central attached
 
 Requires pyserial:  pip install pyserial
 
@@ -16,6 +17,7 @@ Epee only: the UI sets just the red (left, 0x04) and green (right,
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import threading
@@ -360,20 +362,32 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description="Favero epee emulator web UI")
+    ap.add_argument("port", nargs="?", default=None,
+                    help="serial port for the central (default: first COM found)")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="interface to serve on (default 127.0.0.1; use a LAN IP for access from another PC)")
+    ap.add_argument("--http-port", type=int, default=HTTP_PORT)
+    ap.add_argument("--no-serial", action="store_true",
+                    help="serve the UI without opening a serial port")
+    args = ap.parse_args()
+
     threading.Thread(target=EMU.stream_loop, daemon=True).start()
-    wanted = sys.argv[1] if len(sys.argv) > 1 else None
-    ports = [p.device for p in list_ports.comports()]
-    target = wanted or (ports[0] if ports else None)
-    if target:
-        try:
-            EMU.connect(target)
-            print(f"streaming Favero frames on {target} @2400 8N1")
-        except Exception as e:
-            print(f"could not open {target}: {e} - use the web UI to connect")
+    if args.no_serial:
+        print("no serial port - connect from the web UI")
     else:
-        print("no serial port found - connect from the web UI")
-    print(f"open http://localhost:{HTTP_PORT}")
-    ThreadingHTTPServer(("127.0.0.1", HTTP_PORT), Handler).serve_forever()
+        ports = [p.device for p in list_ports.comports()]
+        target = args.port or (ports[0] if ports else None)
+        if target:
+            try:
+                EMU.connect(target)
+                print(f"streaming Favero frames on {target} @2400 8N1")
+            except Exception as e:
+                print(f"could not open {target}: {e} - use the web UI to connect")
+        else:
+            print("no serial port found - connect from the web UI")
+    print(f"open http://{args.host}:{args.http_port}")
+    ThreadingHTTPServer((args.host, args.http_port), Handler).serve_forever()
     return 0
 
 
