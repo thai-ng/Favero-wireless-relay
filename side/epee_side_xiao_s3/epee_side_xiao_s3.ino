@@ -89,18 +89,18 @@
 // switch no longer cuts power, it is a sleep signal on D10/GPIO9
 // (middle -> D10, one outer -> GND, other nc; LOW = OFF = deep
 // sleep, HIGH = ON; a broken wire reads ON = awake, fail-safe).
-// Wake: switch ON (ext1, GPIO9 is an RTC pin) or a 60 s timer tick
-// in the auto-sleep case; the pairing button (GPIO44) can NOT wake
-// from deep sleep — it is not an RTC pin. 2026-11-20: switch-ON
-// wake FAILED in the field (only RST revived it) because the
-// digital pull-up from pinMode dies in deep sleep, leaving the
-// pin floating with the switch open — ext1 never fired. Fixed by
-// enabling the RTC pull-up in setup (rtc_gpio_pullup_en), which
-// stays on in deep sleep. If it ever fails again, the hardware
-// fallback is a 100k external pull-up from D10 to 3V3 (~33 uA
-// drain while the switch is OFF).
-// from deep sleep (not an RTC pin). Auto-sleep: 15 min with no
-// central packets (paired only, never while learning/testing).
+// Wake: switch ON (ext1, GPIO9 is an RTC pin); the pairing button
+// (GPIO44) can NOT wake from deep sleep — it is not an RTC pin.
+// 2026-11-20: switch-ON wake FAILED in the field (only RST revived
+// it) because the digital pull-up from pinMode dies in deep sleep,
+// leaving the pin floating with the switch open — ext1 never fired.
+// Fixed by enabling the RTC pull-up in setup (rtc_gpio_pullup_en),
+// which stays on in deep sleep. If it ever fails again, the hardware
+// fallback is a 100k external pull-up from D10 to 3V3 (~33 uA drain
+// while the switch is OFF).
+// Auto-sleep REMOVED 2026-11-20: the board used to sleep after 15 min
+// with no central packets, but it went dark on the bench while the link
+// looked fine — the PWR switch is now the only off.
 
 #include <WiFi.h>
 #include <esp_now.h>
@@ -117,8 +117,6 @@
 #define PIN_SIDE 8     // D9 pad = GPIO8
 #define PIN_PWR 9      // D10 pad = GPIO9 (PWR switch SIGNAL, 2026-11-08)
 #define PWR_LOW_IS_OFF 1  // switch grounded (LOW) = OFF / deep sleep
-#define AUTO_SLEEP_MS (15UL * 60UL * 1000UL)  // no packets -> sleep
-#define AUTO_SLEEP_CHECK_MS 60000UL           // timer wake interval
 #define PIN_BUILTIN 21 // amber user LED (mirrors blue status)
 // The XIAO S3 user LED is wired VCC -> LED -> GPIO21: it lights
 // when the pin is LOW (verified empirically 2026-10-22: the
@@ -204,14 +202,20 @@ static void set_rgb(bool r, bool g, bool b) {
 // --- power: the switch is a sleep signal, not a power cut -----------
 // The battery stays wired straight to B+/B- so the charger IC keeps
 // charging from USB while the board is "off". OFF = deep sleep; wake
-// on switch ON (ext1 — PIN_PWR/GPIO9 is an RTC pin) or a 60 s timer
-// tick (auto-sleep case only). The pairing button (D7/GPIO44) can NOT
-// wake from deep sleep — it is not an RTC pin — so it stays
-// pairing-only while awake. Deep sleep is tens-to-hundreds of uA
-// (months on the 1000 mAh cell), not true zero like the old series
-// switch was; the XIAO's onboard RST button still resets a wedged
-// board. Fail-safe: a broken switch wire reads HIGH (pull-up) = ON,
-// so the board stays awake rather than sleeping forever.
+// on switch ON (ext1 — PIN_PWR/GPIO9 is an RTC pin). The pairing
+// button (D7/GPIO44) can NOT wake from deep sleep — it is not an RTC
+// pin — so it stays pairing-only while awake. Deep sleep is
+// tens-to-hundreds of uA (months on the 1000 mAh cell), not true zero
+// like the old series switch was; the XIAO's onboard RST button still
+// resets a wedged board. Fail-safe: a broken switch wire reads HIGH
+// (pull-up) = ON, so the board stays awake rather than sleeping
+// forever.
+// No auto-sleep (removed 2026-11-20): the board used to sleep after
+// 15 min with no central packets, but it went dark on the bench while
+// the link looked fine, so the PWR switch is now the only off. A lost
+// link just shows the slow-blink "link lost" LED and the board stays
+// awake (~80 mA, ~12 h on the 1000 mAh cell) until the switch is
+// flipped OFF.
 static bool pwr_is_off() {
 #if PWR_LOW_IS_OFF
   return digitalRead(PIN_PWR) == LOW;
@@ -220,18 +224,15 @@ static bool pwr_is_off() {
 #endif
 }
 
-static void go_sleep(bool timer_wake) {
+static void go_sleep() {
   set_rgb(false, false, false);
   digitalWrite(PIN_BUILTIN, BUILTIN_OFF);
   Serial.flush();
   esp_now_deinit();
   WiFi.mode(WIFI_OFF);
   esp_sleep_enable_ext1_wakeup(1ULL << PIN_PWR, ESP_EXT1_WAKEUP_ANY_HIGH);
-  if (timer_wake) esp_sleep_enable_timer_wakeup(AUTO_SLEEP_CHECK_MS * 1000ULL);
   esp_deep_sleep_start();
 }
-
-static esp_sleep_wakeup_cause_t wake_cause = ESP_SLEEP_WAKEUP_UNDEFINED;
 
 static void send_packet(uint8_t type, uint8_t lamp) {
   Packet p{};
@@ -302,7 +303,6 @@ static void on_recv(const esp_now_recv_info_t *info,
 }
 
 void setup() {
-  wake_cause = esp_sleep_get_wakeup_cause();
   Serial.begin(115200);
   pinMode(PIN_R, OUTPUT);
   pinMode(PIN_G, OUTPUT);
@@ -325,7 +325,7 @@ void setup() {
   // works on USB — the charger IC is independent of the ESP32.
   if (pwr_is_off()) {
     Serial.println("PWR switch OFF at boot - deep sleep");
-    go_sleep(false);
+    go_sleep();
   }
 
   side = read_side_switch();
@@ -416,23 +416,10 @@ void loop() {
     pwr_stable = pwr_raw;
     if (pwr_is_off()) {
       Serial.println("PWR switch OFF - deep sleep (wake on switch ON)");
-      go_sleep(false);
+      go_sleep();
     } else {
       Serial.println("PWR switch ON");
     }
-  }
-
-  // --- timer wake (auto-sleep tick): no central in 5 s -> sleep again
-  if (wake_cause == ESP_SLEEP_WAKEUP_TIMER && !have_pkt && now > 5000) {
-    Serial.println("timer wake, no central - back to sleep");
-    go_sleep(true);
-  }
-
-  // --- auto-sleep: paired, switch ON, no central packets for 15 min -
-  if (paired && !learning && !test_active && have_pkt &&
-      (now - last_pkt_ms > AUTO_SLEEP_MS)) {
-    Serial.println("no central packets 15 min - deep sleep");
-    go_sleep(true);
   }
 
   // --- button: pairing only. Short press does nothing; ---------

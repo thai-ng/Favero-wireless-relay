@@ -54,13 +54,17 @@ The PWR switch is a sleep signal, not a power cut: battery
 straight to B+/B− (charging works on USB while "off"), switch
 middle → D10/GPIO9, one outer → GND, other nc; LOW = OFF =
 deep sleep, HIGH = ON. Wake: switch ON (ext1 — GPIO9 is an
-RTC pin) or a 60 s timer tick in the auto-sleep case.
-Auto-sleep: 15 min with no central packets (paired only,
-never while learning/testing); a timer wake with no central
-in 5 s sleeps again. The pairing button (D7/GPIO44) can NOT
-wake from deep sleep — it is not an RTC pin — so it stays
-pairing-only while awake. Fail-safe: a broken switch wire
-reads HIGH (pull-up) = ON, so the board stays awake.
+RTC pin). The pairing button (D7/GPIO44) can NOT wake from
+deep sleep — it is not an RTC pin — so it stays pairing-only
+while awake. Fail-safe: a broken switch wire reads HIGH
+(pull-up) = ON, so the board stays awake.
+
+Auto-sleep REMOVED 2026-11-20: the board used to sleep after
+15 min with no central packets, but it went dark on the bench
+while the link looked fine (same table as the central), so the
+PWR switch is now the only off. A lost link just shows the
+slow-blink "link lost" LED and the board stays awake (~80 mA,
+~12 h on the cell) until the switch is flipped OFF.
 
 ## Pin map (2026-11-08, soldered build — corrected twice)
 
