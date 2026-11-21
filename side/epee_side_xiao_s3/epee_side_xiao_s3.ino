@@ -14,15 +14,22 @@
 //   D4 = GPIO5  -> 220R -> RGB B leg
 //   RGB common (longest) leg -> GND (common cathode;
 //   common-anode part: leg -> 3V3, set RGB_COMMON_ANODE 1)
-//   D8 = GPIO7  -> 12 mm tact button -> GND (internal pull-up,
+//   D7 = GPIO44 -> 12 mm tact button -> GND (internal pull-up,
 //   diagonal pins). PAIRING ONLY on this build (see below).
-//   (Button moved D5 -> D8 in the soldered build 2026-11-08;
-//   the button is also the future auto-sleep wake pin.)
-//   D10 = GPIO9 -> SS12D00 side-select slide switch: middle pin
-//   -> D10, one outer pin -> GND, other outer pin open. Internal
+//   (Button moved D5 -> D7 in the soldered build 2026-11-08;
+//   GPIO44 is not an RTC pin, so the button can NOT wake the
+//   board from deep sleep.)
+//   D9 = GPIO8  -> SS12D00 side-select slide switch: middle pin
+//   -> D9, one outer pin -> GND, other outer pin open. Internal
 //   pull-up reads it: grounded = LEFT (red), open = RIGHT (green).
 //   If the built unit's knob direction feels backwards, flip
 //   SIDE_LOW_IS_LEFT to 0 - one line, no rewiring.
+//   D10 = GPIO9 -> SS12D00 PWR slide switch (sleep signal, not a
+//   power cut): middle pin -> D10, one outer pin -> GND, other
+//   outer pin open. Grounded = OFF (deep sleep), open = ON.
+//   GPIO9 is an RTC pin, so it can wake the chip from deep sleep
+//   via ext1 — but ONLY with the RTC pull-up enabled (see setup);
+//   the digital pull-up from pinMode dies in deep sleep.
 //   D2 = GPIO3 deliberately unused (ESP32-S3 strapping pin).
 //   The S3 HAS a user LED (amber, GPIO21) - it MIRRORS the RGB
 //   blue status channel, DevKit-style: off = link established,
@@ -35,7 +42,8 @@
 //   (verified 2026-10-22: LEARN timed out; with the antenna
 //   attached, pairing and link passed immediately).
 //   Power: 503450 LiPo on the B+/B- pads (onboard charging);
-//   charge with the power switch ON (OFF disconnects the cell).
+//   the cell stays wired straight to B+/B-, so USB charging
+//   works while the board is "off" (see POWER below).
 //
 // SIDE SELECTION IS THE SWITCH NOW (2026-10-17 decision):
 // side is read from the physical switch at boot and live
@@ -83,6 +91,14 @@
 // sleep, HIGH = ON; a broken wire reads ON = awake, fail-safe).
 // Wake: switch ON (ext1, GPIO9 is an RTC pin) or a 60 s timer tick
 // in the auto-sleep case; the pairing button (GPIO44) can NOT wake
+// from deep sleep — it is not an RTC pin. 2026-11-20: switch-ON
+// wake FAILED in the field (only RST revived it) because the
+// digital pull-up from pinMode dies in deep sleep, leaving the
+// pin floating with the switch open — ext1 never fired. Fixed by
+// enabling the RTC pull-up in setup (rtc_gpio_pullup_en), which
+// stays on in deep sleep. If it ever fails again, the hardware
+// fallback is a 100k external pull-up from D10 to 3V3 (~33 uA
+// drain while the switch is OFF).
 // from deep sleep (not an RTC pin). Auto-sleep: 15 min with no
 // central packets (paired only, never while learning/testing).
 
@@ -90,6 +106,7 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_sleep.h>
+#include <driver/rtc_io.h>
 #include <Preferences.h>
 
 #define WIFI_CHANNEL 6
@@ -293,6 +310,13 @@ void setup() {
   pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_SIDE, INPUT_PULLUP);
   pinMode(PIN_PWR, INPUT_PULLUP);
+  // RTC pull-up for the PWR pin (2026-11-20 fix): the digital
+  // pull-up from pinMode does NOT survive deep sleep, so with the
+  // switch open the pin floated and ext1 never fired — flipping
+  // the switch ON could not wake the board, only RST did. The
+  // RTC pull-up stays on in deep sleep and holds the pin HIGH.
+  rtc_gpio_pullup_en((gpio_num_t)PIN_PWR);
+  delay(5);  // let the pin settle before the OFF check below
   pinMode(PIN_BUILTIN, OUTPUT);
   digitalWrite(PIN_BUILTIN, BUILTIN_OFF);
   set_rgb(false, false, false);
