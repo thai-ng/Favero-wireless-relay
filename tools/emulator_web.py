@@ -191,19 +191,38 @@ class Emulator:
     def _ports(self):
         # list_ports.comports() takes seconds on Windows - and the UI
         # polls status 3x/s - so cache the enumeration for 10 s.
+        # Each entry is {"port", "label"}: the label is the device
+        # description, plus the USB serial when it identifies the
+        # board - the XIAO's serial is its MAC, which tells the :98
+        # spare from the :fc receiver; the CP210x serial ("0001") is
+        # meaningless and is left off, as is the built-in COM1 (no
+        # serial).
         now = time.monotonic()
         if now - Emulator._ports_cache_ms > 10:
-            Emulator._ports_cache = [p.device
-                                      for p in list_ports.comports()]
+            infos = []
+            for p in list_ports.comports():
+                # pyserial's description already ends in " (COMn)" on
+                # Windows - strip it, the port is shown separately.
+                label = p.description or p.device
+                suffix = f" ({p.device})"
+                if label.endswith(suffix):
+                    label = label[:-len(suffix)]
+                serial = getattr(p, "serial_number", None)
+                if serial and len(serial) > 4:
+                    label += f" ({serial})"
+                infos.append({"port": p.device, "label": label})
+            Emulator._ports_cache = infos
             Emulator._ports_cache_ms = now
         return Emulator._ports_cache
 
     def status(self) -> dict:
         with self.lock:
+            ports = self._ports()
             return {
                 "connected": self.ser is not None,
                 "port": self.port,
-                "ports": self._ports(),
+                "ports": [i["port"] for i in ports],
+                "port_info": ports,
                 "left_score": self.left_score,
                 "right_score": self.right_score,
                 "minutes": self.minutes,
@@ -298,7 +317,8 @@ async function refresh(){
   const sel = document.getElementById('port');
   if (document.activeElement !== sel){
     const cur = sel.value;
-    sel.innerHTML = s.ports.map(p=>'<option'+(p===s.port?' selected':'')+'>'+p+'</option>').join('');
+    const infos = s.port_info || s.ports.map(p=>({port:p,label:p}));
+    sel.innerHTML = infos.map(i=>'<option value="'+i.port+'"'+(i.port===s.port?' selected':'')+'>'+i.port+' - '+i.label+'</option>').join('');
     if (cur && s.ports.includes(cur)) sel.value = cur;
   }
 }
