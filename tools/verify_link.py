@@ -15,6 +15,7 @@ COM4 default was the DevKit's port — the XIAO enumerates differently.)
 """
 import argparse
 import json
+import os
 import sys
 import threading
 import time
@@ -24,6 +25,10 @@ import serial
 from serial.tools import list_ports
 
 lines = []
+
+# Emulator web UI base. On the OptiPlex localhost:8765 is the GUI
+# agent, so set EMU_URL=http://192.168.50.133:8765 there.
+EMU = os.environ.get("EMU_URL", "http://localhost:8765")
 
 
 def pick_port(explicit):
@@ -46,7 +51,7 @@ def pick_port(explicit):
 
 def post(path, body):
     req = urllib.request.Request(
-        "http://localhost:8765" + path,
+        EMU + path,
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
     urllib.request.urlopen(req, timeout=5).read()

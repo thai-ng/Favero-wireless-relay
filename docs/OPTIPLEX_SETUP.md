@@ -19,10 +19,19 @@ Windows, default shell cmd; use `powershell -Command` when needed.
 ## Ports (2026-11-09)
 - Side unit (XIAO ESP32S3, MAC 44:bd:8d:ed:4c:fc) = **COM3**
   ("USB Serial Device"). COM1 is the built-in port, ignore it.
-- **No central on the OptiPlex** (no CP210x): end-to-end link
-  verify cannot run from here. The emulator web UI CAN run
-  (serves, no serial — see below); the side still links over
-  ESP-NOW to the laptop's central when that is on.
+- **Central now lives on the OptiPlex too** (decision 2026-11-20):
+  plug the DevKit in and it enumerates as the CP210x device on
+  the next free COM port (COM3 is the side, so likely COM4).
+  Connect the emulator to it from the web UI
+  (http://192.168.50.133:8765) or `POST /api/connect`.
+  End-to-end link verify then runs from here.
+- Verify scripts take the emulator URL from `EMU_URL`
+  (default http://localhost:8765). On the OptiPlex set
+  `$env:EMU_URL='http://192.168.50.133:8765'` — localhost:8765
+  is the GUI agent. `verify_xiao_link.py` still auto-detects
+  the side (the only "USB Serial Device"); `verify_link.py`
+  needs an explicit port once the central is present (two
+  hinted ports), e.g. `verify_link.py COM3`.
 - Port scripts (`read_console.py`, `log_pair.py`, `log_side.py`,
   `verify_xiao_link.py`) pick the port by description "USB Serial
   Device" — works on both machines (explicit port arg also

@@ -1,5 +1,10 @@
+import os
 import serial, sys, time, json, urllib.request
 from serial.tools import list_ports
+
+# Emulator web UI base. On the OptiPlex localhost:8765 is the GUI
+# agent, so set EMU_URL=http://192.168.50.133:8765 there.
+EMU = os.environ.get("EMU_URL", "http://localhost:8765")
 
 def pick_port():
     # Explicit port wins: `verify_xiao_link.py COM7` (laptop) / COM3 (OptiPlex).
@@ -17,7 +22,7 @@ def pick_port():
 
 def hit(side):
     req = urllib.request.Request(
-        "http://localhost:8765/api/hit",
+        EMU + "/api/hit",
         data=json.dumps({"side": side}).encode(),
         headers={"Content-Type": "application/json"})
     urllib.request.urlopen(req, timeout=5).read()
